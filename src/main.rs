@@ -25,10 +25,9 @@ impl App {
     }
 
     fn on_tick(&mut self) {
-        // Update UI state on tick
-        if self.music_player.is_playing() && self.music_player.get_progress().unwrap_or(0.0) >= 1.0 {
+        if self.music_player.is_track_finished() {
             if let Err(e) = self.music_player.next_track() {
-                eprintln!("Error playing next track: {}", e);
+                eprintln!("Error advancing track: {}", e);
             }
         }
     }

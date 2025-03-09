@@ -196,7 +196,7 @@ impl MusicPlayer {
 
     pub fn is_playing(&self) -> bool {
         if let Some(sink) = &self.sink {
-            !sink.is_paused() && !sink.empty()
+            !sink.is_paused() && !self.is_track_finished()
         } else {
             false
         }
@@ -218,5 +218,22 @@ impl MusicPlayer {
         let elapsed = self.get_elapsed_time();
         let total = self.get_total_time();
         (elapsed, total)
+    }
+
+    pub fn check_auto_advance(&mut self) -> Result<(), Box<dyn Error>> {
+        if let (Some(sink), Some(start), Some(duration)) = (&self.sink, self.start_time, self.duration) {
+            if !sink.is_paused() && start.elapsed() >= duration {
+                return self.next_track();
+            }
+        }
+        Ok(())
+    }
+
+    pub fn is_track_finished(&self) -> bool {
+        if let (Some(start), Some(duration)) = (self.start_time, self.duration) {
+            start.elapsed() >= duration
+        } else {
+            false
+        }
     }
 }
