@@ -1,7 +1,10 @@
+use rodio::{Decoder, OutputStream, Sink};
 use std::time::{Duration, Instant};
-use std::ops::Sub;
-use rodio::{Decoder, OutputStream, Sink, Source};
 use std::{error::Error, fs::File, io::BufReader, path::PathBuf};
+use symphonia::core::probe::Hint;
+use symphonia::core::formats::FormatOptions;
+use symphonia::core::io::MediaSourceStream;
+use symphonia::core::meta::MetadataOptions;
 
 pub struct MusicPlayer {
     pub tracks: Vec<PathBuf>,
@@ -11,9 +14,8 @@ pub struct MusicPlayer {
     _stream: Option<OutputStream>,
     pub volume: f32,
     start_time: Option<Instant>,
-    elapsed: Duration,
-    paused_time: Option<Instant>,
     duration: Option<Duration>,
+    paused_duration: Option<Duration>,
 }
 
 impl MusicPlayer {
@@ -26,14 +28,32 @@ impl MusicPlayer {
             _stream: None,
             volume: 1.0,
             start_time: None,
-            elapsed: Duration::from_secs(0),
-            paused_time: None,
             duration: None,
+            paused_duration: None,
         }
     }
 
     pub fn add_track(&mut self, path: PathBuf) {
         self.tracks.push(path);
+    }
+
+    fn get_track_duration(path: &PathBuf) -> Option<Duration> {
+        let file = File::open(path).ok()?;
+        let stream = MediaSourceStream::new(Box::new(file), Default::default());
+        let hint = Hint::new();
+        let format_opts = FormatOptions::default();
+        let metadata_opts = MetadataOptions::default();
+        
+        let probed = symphonia::default::get_probe()
+            .format(&hint, stream, &format_opts, &metadata_opts)
+            .ok()?;
+        
+        let format = probed.format;
+        let track = format.tracks().get(0)?;
+        let time_base = track.codec_params.time_base?;
+        let n_frames = track.codec_params.n_frames?;
+        
+        Some(Duration::from_secs_f64(n_frames as f64 * time_base.numer as f64 / time_base.denom as f64))
     }
 
     pub fn play_track(&mut self, index: usize) -> Result<(), Box<dyn Error>> {
@@ -42,6 +62,9 @@ impl MusicPlayer {
         }
 
         self.stop();
+
+        // Get track duration first
+        self.duration = Self::get_track_duration(&self.tracks[index]);
 
         if self._stream.is_none() {
             let (stream, handle) = OutputStream::try_default()?;
@@ -54,9 +77,6 @@ impl MusicPlayer {
             let reader = BufReader::new(file);
             let source = Decoder::new(reader)?;
             
-            // Get duration using the Source trait
-            self.duration = source.total_duration();
-            
             let sink = Sink::try_new(handle)?;
             sink.set_volume(self.volume);
             sink.append(source);
@@ -65,54 +85,68 @@ impl MusicPlayer {
             self.current_track = Some(index);
             self.sink = Some(sink);
             self.start_time = Some(Instant::now());
-            self.elapsed = Duration::from_secs(0);
-            self.paused_time = None;
+            self.paused_duration = None;
         }
-
         Ok(())
     }
 
-    pub fn play(&mut self) {
-        if let Some(sink) = &self.sink {
-            sink.play();
-            if let Some(paused_at) = self.paused_time {
-                self.elapsed += paused_at.elapsed();
-                // Using checked_sub for safe subtraction
-                if let Some(new_start) = Instant::now().checked_sub(self.elapsed) {
-                    self.start_time = Some(new_start);
-                }
+    pub fn get_progress(&self) -> Option<f32> {
+        if let (Some(start), Some(duration)) = (self.start_time, self.duration) {
+            if self.is_playing() {
+                let elapsed = if let Some(paused) = self.paused_duration {
+                    paused
+                } else {
+                    start.elapsed()
+                };
+                Some((elapsed.as_secs_f32() / duration.as_secs_f32()).min(1.0))
+            } else if let Some(paused) = self.paused_duration {
+                Some((paused.as_secs_f32() / duration.as_secs_f32()).min(1.0))
+            } else {
+                None
             }
-            self.paused_time = None;
-        }
-    }
-
-    pub fn pause(&mut self) {
-        if let Some(sink) = &self.sink {
-            sink.pause();
-            self.paused_time = Some(Instant::now());
-            if let Some(start) = self.start_time {
-                self.elapsed = start.elapsed();
-            }
-        }
-    }
-
-    pub fn stop(&mut self) {
-        if let Some(sink) = &self.sink {
-            sink.stop();
-        }
-        self.sink = None;
-        self.start_time = None;
-        self.duration = None;
-        self.elapsed = Duration::from_secs(0);
-        self.paused_time = None;
-    }
-
-    pub fn is_playing(&self) -> bool {
-        if let Some(sink) = &self.sink {
-            !sink.is_paused() && !sink.empty()
         } else {
-            false
+            None
         }
+    }
+
+    pub fn get_elapsed_time(&self) -> String {
+        if let Some(start) = self.start_time {
+            let elapsed = if let Some(paused) = self.paused_duration {
+                paused
+            } else {
+                start.elapsed()
+            };
+            let seconds = elapsed.as_secs();
+            let minutes = seconds / 60;
+            let remaining_seconds = seconds % 60;
+            format!("{:02}:{:02}", minutes, remaining_seconds)
+        } else {
+            "00:00".to_string()
+        }
+    }
+
+    pub fn next_track(&mut self) -> Result<(), Box<dyn Error>> {
+        if let Some(current) = self.current_track {
+            let next = (current + 1) % self.tracks.len();
+            self.play_track(next)?;
+        } else if !self.tracks.is_empty() {
+            self.play_track(0)?;
+        }
+        Ok(())
+    }
+
+    pub fn previous_track(&mut self) -> Result<(), Box<dyn Error>> {
+        if let Some(current) = self.current_track {
+            let previous = if current == 0 {
+                self.tracks.len() - 1
+            } else {
+                current - 1
+            };
+            self.play_track(previous)?;
+        } else if !self.tracks.is_empty() {
+            self.play_track(self.tracks.len() - 1)?;
+        }
+        Ok(())
     }
 
     pub fn increase_volume(&mut self) {
@@ -129,56 +163,60 @@ impl MusicPlayer {
         }
     }
 
-    pub fn next_track(&mut self) -> Result<(), Box<dyn Error>> {
-        if let Some(current) = self.current_track {
-            let next = (current + 1) % self.tracks.len();
-            self.play_track(next)?;
-        }
-        Ok(())
-    }
-
-    pub fn previous_track(&mut self) -> Result<(), Box<dyn Error>> {
-        if let Some(current) = self.current_track {
-            let previous = if current == 0 {
-                self.tracks.len() - 1
-            } else {
-                current - 1
-            };
-            self.play_track(previous)?;
-        }
-        Ok(())
-    }
-
-    pub fn get_progress(&self) -> Option<f32> {
+    pub fn play(&mut self) {
         if let Some(sink) = &self.sink {
-            let played = sink.len() as f32;
-            let total = sink.len() as f32;
-            if total > 0.0 {
-                Some((1.0 - (played / total)).min(1.0))
-            } else {
-                Some(0.0)
+            sink.play();
+            if let Some(paused) = self.paused_duration {
+                self.start_time = Some(Instant::now() - paused);
+                self.paused_duration = None;
+            } else if self.start_time.is_none() {
+                self.start_time = Some(Instant::now());
             }
-        } else {
-            None
         }
     }
 
-    pub fn get_duration(&self) -> Option<Duration> {
+    pub fn pause(&mut self) {
         if let Some(sink) = &self.sink {
-            Some(Duration::from_secs_f32(sink.len() as f32))
-        } else {
-            None
+            sink.pause();
+            if let Some(start) = self.start_time {
+                self.paused_duration = Some(start.elapsed());
+            }
         }
     }
 
-    pub fn get_elapsed_time(&self) -> String {
+    pub fn stop(&mut self) {
         if let Some(sink) = &self.sink {
-            let seconds = (sink.len() as f32 * (1.0 - sink.speed())) as u64;
-            let minutes = seconds / 60;
-            let remaining_seconds = seconds % 60;
-            format!("{:02}:{:02}", minutes, remaining_seconds)
+            sink.stop();
+        }
+        self.sink = None;
+        self.start_time = None;
+        self.duration = None;
+        self.paused_duration = None;
+    }
+
+    pub fn is_playing(&self) -> bool {
+        if let Some(sink) = &self.sink {
+            !sink.is_paused() && !sink.empty()
+        } else {
+            false
+        }
+    }
+
+    pub fn get_total_time(&self) -> String {
+        if let Some(duration) = self.duration {
+            let total_secs = duration.as_secs();
+            let minutes = total_secs / 60;
+            let seconds = total_secs % 60;
+            format!("{:02}:{:02}", minutes, seconds)
         } else {
             "00:00".to_string()
         }
+    }
+
+    // Add a method to get both elapsed and total time in one call
+    pub fn get_time_info(&self) -> (String, String) {
+        let elapsed = self.get_elapsed_time();
+        let total = self.get_total_time();
+        (elapsed, total)
     }
 }

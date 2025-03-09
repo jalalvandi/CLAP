@@ -6,4 +6,6 @@ edition = "2021"
 [dependencies]
 tui = "0.19"
 crossterm = "0.25"
-rodio = "0.17"
+rodio = { version = "0.17", features = ["mp3", "wav", "flac"] }
+symphonia = { version = "0.5", features = ["mp3", "isomp4", "aac"] }
+unicode-width = "0.1.10"
