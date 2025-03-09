@@ -42,6 +42,6 @@ CLAP
 
 ## Usage
 
-- Use the terminal interface to navigate through your music library.
+- Use the terminal interface to navigate through your OS music library 
 - Control playback with the provided commands (play, pause, stop).
 - Enjoy your music!
