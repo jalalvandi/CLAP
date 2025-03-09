@@ -28,3 +28,9 @@ jobs:
       
     - name: Run tests
       run: cargo test --verbose
+
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v3
+      with:
+        name: binary
+        path: target/debug/music-cli-1
