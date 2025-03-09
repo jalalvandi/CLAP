@@ -1,16 +1,16 @@
-# Music CLI
+# CLAP
 
-A terminal-based music player application built in Rust. This project provides a simple user interface for playing audio files, with controls for playback and track management.
+CLAP (Command Line Audio Player) is a simple music player that runs right in your terminal.This project provides a simple user interface for playing audio files, with controls for playback and track management.
 
 ## Project Structure
 
 ```
-music-cli
+CLAP
 ├── src
 │   ├── main.rs          # Entry point of the application
 │   ├── player           # Module for audio playback functionality
 │   │   ├── mod.rs       # Player module exports
-│   │   └── controls.rs   # Playback control functions
+│   │   └── controls.rs  # Playback control functions
 │   ├── ui               # Module for user interface
 │   │   ├── mod.rs       # UI module exports
 │   │   └── tui.rs       # Terminal user interface functions
@@ -26,7 +26,7 @@ music-cli
 
 1. Clone the repository:
    ```bash
-   git clone <repository-url>
+   git clone https://github.com/jalalvandi/CLAP
    cd music-cli
    ```
 
